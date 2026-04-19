@@ -23,3 +23,10 @@ Read `skills/humandelta-api/SKILL.md` for full API reference.
 ```bash
 ./skills/humandelta-api/scripts/humandelta.sh <command> [args]
 ```
+
+## Credits
+
+Human Delta API was created by **Eric Ly**.
+- [Personal Website](https://www.lyyeric.tech/)
+- [GitHub](https://github.com/lyeric2022)
+
