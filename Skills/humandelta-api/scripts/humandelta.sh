@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Human Delta API CLI helper
-# Based on the latest Agent Reference
+# Based on the Agent Reference as of 2026-04-18
 # Requires: HUMANDELTA_API_KEY set in environment
 
 set -e
