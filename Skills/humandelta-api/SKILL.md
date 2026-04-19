@@ -211,7 +211,3 @@ All errors return JSON: { "detail": "<human-readable message>" }
 429 Too Many Req  — rate limit exceeded; back off and retry
 500 Server Error  — transient; safe to retry after 5 s
 
----
-
-Created by [Eric Ly](https://www.lyyeric.tech/) ([@lyeric2022](https://github.com/lyeric2022))
-
