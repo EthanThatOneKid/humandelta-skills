@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Human Delta API CLI helper
+# Based on the latest Agent Reference
 # Requires: HUMANDELTA_API_KEY set in environment
-#
-# Usage: humandelta.sh <command> [args]
 
 set -e
 
@@ -33,8 +32,11 @@ case "$1" in
           -H "$(json_header)" \
           -d "{
             \"source_type\": \"website\",
-            \"source_url\": \"$url\",
-            \"max_pages_to_crawl\": $max
+            \"name\": \"$name\",
+            \"website\": {
+              \"url\": \"$url\",
+              \"max_pages\": $max
+            }
           }"
         ;;
       poll)
@@ -49,30 +51,40 @@ case "$1" in
     esac
     ;;
   search)
-    query="${2:?Usage: humandelta.sh search <query> [top_k]}"
+    query="${2:?Usage: humandelta.sh search <query> [top_k] [sources]}"
     top_k="${3:-5}"
+    sources="${4:-[\"web\", \"documents\"]}"
     curl -s -X POST "$BASE_URL/v1/search" \
       -H "$(auth_header)" \
       -H "$(json_header)" \
       -d "{
         \"query\": \"$query\",
-        \"top_k\": $top_k
+        \"top_k\": $top_k,
+        \"sources\": $sources
       }"
     ;;
   fs)
     case "$2" in
       shell)
-        cmd="${3:?Usage: fs shell <CMD> <path>}"
-        path="${4:?Missing path}"
+        cmd="${3:?Usage: fs shell <command_string>}"
         curl -s -X POST "$BASE_URL/v1/fs" \
           -H "$(auth_header)" \
           -H "$(json_header)" \
-          -d "{\"cmd\": \"$cmd\", \"path\": \"$path\"}"
+          -d "{\"op\": \"shell\", \"cmd\": \"$cmd\"}"
         ;;
       read)
         path="${3:?Usage: fs read <path>}"
-        curl -s "$BASE_URL/v1/fs?path=$path" \
-          -H "$(auth_header)"
+        curl -s -X POST "$BASE_URL/v1/fs" \
+          -H "$(auth_header)" \
+          -H "$(json_header)" \
+          -d "{\"op\": \"read\", \"path\": \"$path\"}"
+        ;;
+      stat)
+        path="${3:?Usage: fs stat <path>}"
+        curl -s -X POST "$BASE_URL/v1/fs" \
+          -H "$(auth_header)" \
+          -H "$(json_header)" \
+          -d "{\"op\": \"stat\", \"path\": \"$path\"}"
         ;;
       write)
         path="${3:?Usage: fs write <path> <content>}"
@@ -80,17 +92,17 @@ case "$1" in
         curl -s -X POST "$BASE_URL/v1/fs" \
           -H "$(auth_header)" \
           -H "$(json_header)" \
-          -d "{\"cmd\": \"WRITE\", \"path\": \"$path\", \"content\": \"$content\"}"
+          -d "{\"op\": \"write\", \"path\": \"$path\", \"content\": \"$content\"}"
         ;;
       delete|rm)
         path="${3:?Usage: fs delete <path>}"
         curl -s -X POST "$BASE_URL/v1/fs" \
           -H "$(auth_header)" \
           -H "$(json_header)" \
-          -d "{\"cmd\": \"RM\", \"path\": \"$path\"}"
+          -d "{\"op\": \"delete\", \"path\": \"$path\"}"
         ;;
       *)
-        echo "Usage: humandelta.sh fs {shell <CMD> <path>|read <path>|write <path> <content>|delete <path>}"
+        echo "Usage: humandelta.sh fs {shell <CMD>|read <path>|stat <path>|write <path> <content>|delete <path>}"
         exit 1
         ;;
     esac
@@ -125,14 +137,15 @@ case "$1" in
     echo "  indexes list                       List all indexes"
     echo "  indexes create <name> <url> [max]  Create and start a crawl job"
     echo "  indexes poll <index_id>            Poll until crawl completes"
-    echo "  search <query> [top_k]             Vector similarity search"
-    echo "  fs shell <CMD> <path>              Run VFS shell command"
+    echo "  search <query> [top_k] [sources]   Vector similarity search"
+    echo "  fs shell <CMD>                     Run VFS shell command"
     echo "  fs read <path>                     Read a VFS file"
-    echo "  fs write <path> <content>          Write to a VFS file"
-    echo "  fs delete <path>                    Delete a VFS file"
-    echo "  docs list                           List uploaded documents"
+    echo "  fs stat <path>                     Get VFS file/dir metadata"
+    echo "  fs write <path> <content>          Write to a VFS file (/agent/ only)"
+    echo "  fs delete <path>                   Delete a VFS file (/agent/ only)"
+    echo "  docs list                          List uploaded documents"
     echo "  docs upload <filepath>             Upload a document"
-    echo "  docs preview <doc_id>              Get extracted text"
+    echo "  docs preview <doc_id>              Get extracted text from document"
     echo ""
     echo "Environment: HUMANDELTA_API_KEY=hd_live_..."
     exit 1

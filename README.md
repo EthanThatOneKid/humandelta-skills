@@ -16,10 +16,10 @@ export HUMANDELTA_API_KEY=hd_live_...
 
 Vector search, website indexing, virtual filesystem, and document management.
 
-Read `Skills/humandelta-api/SKILL.md` for full API reference.
+Read `skills/humandelta-api/SKILL.md` for full API reference.
 
 ## Shell Helper
 
 ```bash
-./Skills/humandelta-api/scripts/humandelta.sh <command> [args]
+./skills/humandelta-api/scripts/humandelta.sh <command> [args]
 ```

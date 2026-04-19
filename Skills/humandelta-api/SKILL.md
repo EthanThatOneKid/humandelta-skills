@@ -1,224 +1,212 @@
 ---
 name: humandelta-api
 description: >
-  Use when you need to index websites, run vector search over org knowledge,
+  Use when the agent needs to index websites, run vector search over org knowledge,
   manage uploaded documents, or explore/write the org KB virtual filesystem.
   All endpoints are under https://api.humandelta.ai.
   Auth: Authorization: Bearer hd_live_<key>  (org-scoped; no org slug in URL).
 ---
 
-# Human Delta API Skill
+# Human Delta API  —  full agent reference
 
-> **API Key:** Set `HUMANDELTA_API_KEY` in your environment.
+Base URL : https://api.humandelta.ai
+Auth     : Authorization: Bearer hd_live_...
+Content  : application/json (except multipart for /v1/documents upload)
 
-## Base URL
+Key rules:
+- Every /v1/* endpoint is scoped to the org that owns the API key.
+- Optional key scopes: fs:read, fs:write. Omit for full access.
+- Indexing is async: POST returns index_id immediately; poll GET until status=completed.
+- Search is synchronous: POST returns results directly.
+- /v1/fs requires at least fs:read scope for reads; fs:write for write/delete.
 
-```
-https://api.humandelta.ai
-```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+INDEXES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-## Auth
+POST /v1/indexes  — create and start a crawl job
 
-```
-Authorization: Bearer hd_live_<key>
-```
-
-All endpoints are org-scoped — no org slug in the URL.
-
-## Content-Type
-
-`application/json` for all endpoints except `/v1/documents` (multipart/form-data).
-
----
-
-## Indexes
-
-### Create and start a crawl job
-
-```bash
-curl -s -X POST https://api.humandelta.ai/v1/indexes \
-  -H "Authorization: Bearer hd_live_<key>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "source_type": "website",
-    "source_url": "https://example.com",
-    "max_pages_to_crawl": 100
-  }'
-```
-
-Response `202`:
-```json
+Request body (JSON):
 {
-  "index_id": "idx_...",
-  "status": "pending"
+  "source_type": "website",          // required; only "website" supported today
+  "name": "Help Center",             // required; human label for this index
+  "website": {
+    "url": "https://docs.example.com",  // required; seed URL to crawl
+    "max_pages": 100                    // optional; default 100, max 500
+                                        // requests above 500 → 400 error
+  }
 }
-```
 
-### Poll until crawl completes
+Response 200:
+{
+  "index_id": "idx_abc123",
+  "status": "queued"
+}
 
-```bash
-# Replace <index_id>
-curl -s "https://api.humandelta.ai/v1/indexes/<index_id>" \
-  -H "Authorization: Bearer hd_live_<key>"
-```
+───────────────────────────────────────────────
 
-Status values: `pending` → `processing` → `completed` | `failed`
+GET /v1/indexes/{index_id}  — poll crawl status
 
-### List all indexes
+Response 200:
+{
+  "index_id": "idx_abc123",
+  "name": "Help Center",
+  "status": "completed",             // queued | running | completed | failed | cancelled
+  "source_type": "website",
+  "source_url": "https://docs.example.com",
+  "pages_discovered": 42,
+  "pages_indexed": 40,
+  "created_at": "2026-04-18T10:00:00Z",
+  "completed_at": "2026-04-18T10:03:12Z",
+  "stages": {
+    "discover": "completed",         // each stage: pending | running | completed | failed
+    "fetch":    "completed",
+    "parse":    "completed",
+    "chunk":    "completed",
+    "embed":    "completed",
+    "store":    "completed"
+  }
+}
 
-```bash
-curl -s https://api.humandelta.ai/v1/indexes \
-  -H "Authorization: Bearer hd_live_<key>"
-```
+Polling pattern: check every 3-5 s; stop when status ∈ {completed, failed, cancelled}.
 
----
+───────────────────────────────────────────────
 
-## Search
+GET /v1/indexes  — list all indexes for this org
 
-### Vector similarity search
+Response 200: { "indexes": [ /* same shape as GET /v1/indexes/{id} */ ] }
 
-```bash
-curl -s -X POST https://api.humandelta.ai/v1/search \
-  -H "Authorization: Bearer hd_live_<key>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "<your question>",
-    "top_k": 5,
-    "filters": {
-      "index_ids": ["idx_..."],
-      "source_type": "web"
-    }
-  }'
-```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SEARCH
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Response `200`:
-```json
+POST /v1/search  — vector similarity search
+
+Request body (JSON):
+{
+  "query":   "How do I reset my password?",  // required
+  "top_k":   5,                              // optional; 1-20, default 5
+  "sources": ["web", "documents"]            // optional; default both
+                                             // "web"       = indexed website pages
+                                             // "documents" = uploaded files (PDF, CSV, …)
+}
+
+Response 200:
 {
   "results": [
     {
-      "content": "...",
-      "source_url": "https://docs.example.com/account/reset",
-      "page_title": "Account & Password",
-      "source_type": "web",
-      "match_type": "semantic"
+      "chunk_id":    "chk_xyz",
+      "score":       0.91,               // cosine similarity 0-1; higher = more relevant
+      "text":        "To reset your password, visit …",
+      "source_url":  "https://docs.example.com/account/reset",
+      "page_title":  "Account & Password",
+      "source_type": "web",             // "web" | "document"
+      "match_type":  "semantic"         // always "semantic" for now
     }
   ]
 }
-```
 
----
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+VIRTUAL FILESYSTEM  (POST /v1/fs)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-## Virtual Filesystem (VFS)
+The KB is exposed as a read-only virtual tree (plus writable /agent/).
+All ops go to:  POST /v1/fs  with JSON body { "op": "...", ...params }
 
-### Run a VFS shell command
+VFS directory structure:
+/
+├── source/
+│   └── website/
+│       └── <domain>/         # one dir per indexed URL domain
+│           └── <page-slug>   # page content as text/markdown
+├── uploads/                  # org-uploaded documents (PDF→text, images, CSV, …)
+├── agent/                    # org shared memory — readable by all, writable with fs:write
+│   └── (any path you write)
+└── skills/                   # read-only skill definitions (if configured)
 
-```bash
-curl -s -X POST https://api.humandelta.ai/v1/fs \
-  -H "Authorization: Bearer hd_live_<key>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "cmd": "MKDIR",
-    "path": "/my-org/knowledge"
-  }'
-```
+─── op: shell ───────────────────────────────
 
-### Write a file
+{ "op": "shell", "cmd": "<command>" }
 
-```bash
-curl -s -X POST https://api.humandelta.ai/v1/fs \
-  -H "Authorization: Bearer hd_live_<key>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "cmd": "WRITE",
-    "path": "/my-org/knowledge/notes.md",
-    "content": "# Notes\n\n..."
-  }'
-```
+Runs a constrained shell over the virtual tree.
+Allowed commands: tree, ls, cat, find, grep, head, wc, echo
+Examples:
+  { "op": "shell", "cmd": "tree /source -L 3" }
+  { "op": "shell", "cmd": "ls /uploads" }
+  { "op": "shell", "cmd": "cat /source/website/docs.example.com/getting-started" }
+  { "op": "shell", "cmd": "grep -r 'billing' /source" }
+  { "op": "shell", "cmd": "find /agent -name '*.md'" }
 
-### Read a file
+Response: { "output": "<stdout as plain text>" }
 
-```bash
-curl -s "https://api.humandelta.ai/v1/fs?path=/my-org/knowledge/notes.md" \
-  -H "Authorization: Bearer hd_live_<key>"
-```
+─── op: read ────────────────────────────────
 
-### Delete a file
+{ "op": "read", "path": "/source/website/docs.example.com/getting-started" }
 
-```bash
-curl -s -X POST https://api.humandelta.ai/v1/fs \
-  -H "Authorization: Bearer hd_live_<key>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "cmd": "RM",
-    "path": "/my-org/knowledge/notes.md"
-  }'
-```
+Returns full file content.
+Response: { "content": "<file text>" }
 
----
+─── op: stat ────────────────────────────────
 
-## Documents
+{ "op": "stat", "path": "/source/website" }
 
-### List uploaded documents
+Returns directory listing or file metadata.
+Response (directory): { "entries": [{ "name": "docs.example.com", "type": "dir" }] }
+Response (file):      { "name": "getting-started", "type": "file", "size": 4821 }
+Response (missing):   { "exists": false }
 
-```bash
-curl -s https://api.humandelta.ai/v1/documents \
-  -H "Authorization: Bearer hd_live_<key>"
-```
+─── op: write  (requires fs:write scope) ────
 
-### Upload a document (multipart)
+{ "op": "write", "path": "/agent/notes/summary.md", "content": "# Summary\n..." }
 
-```bash
-curl -s -X POST https://api.humandelta.ai/v1/documents \
-  -H "Authorization: Bearer hd_live_<key>" \
-  -F "file=@/path/to/document.pdf"
-```
+Only /agent/* paths are writable. Creates parent dirs automatically.
+Response: { "ok": true }
 
-Response `201`:
-```json
+─── op: delete  (requires fs:write scope) ───
+
+{ "op": "delete", "path": "/agent/notes/summary.md" }
+
+Only /agent/* paths are deletable.
+Response: { "ok": true }
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DOCUMENTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+POST /v1/documents  — upload a file (multipart/form-data)
+
+Field: file  — the file to upload
+Allowed types: PDF, PNG, JPEG, WEBP, TXT, MD, CSV
+Max size: 10 MB
+
+Response 200:
 {
-  "doc_id": "doc_...",
-  "status": "pending"
+  "doc_id":   "doc_abc123",
+  "doc_name": "report.pdf",
+  "status":   "processing"   // processing | ready | failed
 }
-```
 
-### Get extracted text
+───────────────────────────────────────────────
 
-```bash
-curl -s "https://api.humandelta.ai/v1/documents/<doc_id>/preview" \
-  -H "Authorization: Bearer hd_live_<key>"
-```
+GET /v1/documents  — list all uploaded documents
 
----
+Response 200: { "documents": [{ "doc_id", "doc_name", "status", "created_at" }] }
 
-## Errors
+───────────────────────────────────────────────
 
-All errors return JSON:
+GET /v1/documents/{doc_id}/preview  — get extracted text
 
-```json
-{ "detail": "<human-readable message>" }
-```
+Response 200: { "text": "<extracted plain text from the file>" }
 
-| Status | Meaning |
-|--------|---------|
-| 400 | Bad Request — invalid body |
-| 401 | Unauthorized — missing/invalid key |
-| 403 | Forbidden — key lacks required scope |
-| 404 | Not Found — resource doesn't exist |
-| 429 | Too Many Requests — rate limited |
-| 500 | Server Error |
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ERRORS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
----
+All errors return JSON: { "detail": "<human-readable message>" }
 
-## Shell Helper
-
-Run `scripts/humandelta.sh` for a CLI wrapper around these endpoints.
-
-```bash
-humandelta.sh indexes list
-humandelta.sh indexes create "My Index" https://example.com 100
-humandelta.sh search "how do I reset password" 5 web
-humandelta.sh fs shell MKDIR /my-org/knowledge
-humandelta.sh fs read /my-org/knowledge/notes.md
-humandelta.sh docs list
-humandelta.sh docs upload /path/to/file.pdf
-```
+400 Bad Request   — invalid body (missing required field, max_pages > 500, etc.)
+401 Unauthorized  — missing or invalid API key
+403 Forbidden     — key lacks required scope (e.g. fs:write)
+404 Not Found     — resource does not exist
+429 Too Many Req  — rate limit exceeded; back off and retry
+500 Server Error  — transient; safe to retry after 5 s
